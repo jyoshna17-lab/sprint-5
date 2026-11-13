@@ -4,16 +4,6 @@ import functions
 from datetime import datetime, date
 app = FastAPI()
 
-USER_TYPES = ["admin", "staff"]
-
-
-def authorize(token, allowed_user_types):
-    payload = functions.verify_token(token=token, token_type="access")
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or Expired token")
-    if payload["user_type"] not in allowed_user_types:
-        raise HTTPException(status_code=403, detail="You do not have permission to do this")
-    return payload
 
 class PackageCreate(BaseModel):
     name: str
@@ -40,6 +30,17 @@ class RegisterRequest(BaseModel):
 class DispatchBatchCreate(BaseModel):
     destination: str
     vehicle: str
+
+USER_TYPES = ["admin", "staff"]
+
+
+def authorize(token, allowed_user_types):
+    payload = functions.verify_token(token=token, token_type="access")
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or Expired token")
+    if payload["user_type"] not in allowed_user_types:
+        raise HTTPException(status_code=403, detail="You do not have permission to do this")
+    return payload
 
 
 @app.post("/packages")
