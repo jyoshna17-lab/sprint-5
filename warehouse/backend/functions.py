@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, String, Column,create_engine, DateTime,ForeignKey
+from sqlalchemy import Integer, String, Column,create_engine, DateTime,ForeignKey,Date
 from sqlalchemy.orm import Session, declarative_base
 from datetime import datetime, timedelta, timezone
 import jwt
@@ -14,7 +14,7 @@ Base = declarative_base()
 USERNAME = "jyoshna"
 PASSWORD = "123"
 
-ACCESS_TOKEN_EXPIRY = 5 #mins
+ACCESS_TOKEN_EXPIRY = 1 #mins
 REFRESH_TOKEN_EXPIRY = 7*24*60
 SECRET_kEY = "SECRET123"
 ALGORITHM = "HS256"
@@ -26,7 +26,7 @@ class Package(Base):
     name=Column(String)
     destination=Column(String)
     weight=Column(Integer)
-    arrival_date=Column(DateTime, default = datetime.now)
+    arrival_date=Column(Date)
     status = Column(String , default = "Pending")
     dispatch_batch_id = Column(Integer, ForeignKey("dispatch_batches.id"), nullable = True )
 
@@ -47,15 +47,15 @@ class User(Base):
     user_id =  Column(Integer, primary_key = True)
     user_name = Column(String)
     password = Column(String)
-    
+    user_type = Column(String, default = "staff")
 
 
 
 Base.metadata.create_all(engine)
 
-def add_package(name, destination, weight):
+def add_package(name, destination, weight, arrival_date):
     session = Session(engine)
-    package=Package(name=name,destination=destination,weight= weight)
+    package = Package(name=name,destination=destination,weight=weight,arrival_date=arrival_date)
     session.add(package)
     session.commit()
     response={
@@ -149,7 +149,7 @@ def get_packages(destination=None, status=None, arrival_date=None):
     session.close()
     return response
 
-def verify_login(username, password):
+def verify_login(username,password):
     session = Session(engine)
     user = session.query(User).filter_by(user_name = username).first()
     if user is None:
@@ -160,18 +160,21 @@ def verify_login(username, password):
     except VerifyMismatchError:
         session.close()
         return False
+    user_type = user.user_type
     session.close()
-    access_token=create_token(username = username, token_type="access")
-    refresh_token=create_token(username = username, token_type="refresh")
-    return {"access_token":access_token, "refresh_token ": refresh_token}
+
+    access_token = create_token(username=username,user_type=user_type,token_type="access")
+    refresh_token = create_token(username=username,user_type=user_type,token_type="refresh")
+    return {"access_token":access_token, "refresh_token": refresh_token}
 
 
-def create_token(username, token_type):
+def create_token(username, user_type, token_type):
     time = ACCESS_TOKEN_EXPIRY
     if token_type == "refresh":
         time = REFRESH_TOKEN_EXPIRY
     payload = {
         "username": username,
+        "user_type": user_type,
         "token_type": token_type,
         "exp": datetime.now(timezone.utc) +timedelta(minutes = time)
     }
@@ -187,7 +190,7 @@ def verify_token(token, token_type):
     except:
         return False
     if payload["token_type"] == token_type:
-        return payload["username"]
+        return payload
     return False
 
 
@@ -239,37 +242,32 @@ def get_warehouse_statistics():
     }
     return response
 
-def add_dispatch_batch(destination, vehicle, package_id):
+def add_dispatch_batch(destination, vehicle):
     session = Session(engine)
-    package = session.query(Package).filter(Package.id == package_id).first()
-    if package is None:
-        session.close()
-        return "Package not found"
-    if package.destination != destination or package.status != "Pending":
-        session.close()
-        return "Invalid package"
-    batch = DispatchBatch(destination=destination, vehicle=vehicle)
-    session.add(batch)
+    new_dispatch_batch = DispatchBatch(
+        destination=destination,
+        vehicle=vehicle,
+        dispatch_status="Dispatched",
+        dispatch_date=datetime.now()
+    )
+    session.add(new_dispatch_batch)
     session.commit()
-    package.dispatch_batch_id = batch.id
+    for package in session.query(Package).filter(Package.destination == destination,Package.status == "Pending",Package.dispatch_batch_id == None).all():
+        package.status = "Dispatched"
+        package.dispatch_batch_id = new_dispatch_batch.id
     session.commit()
-    result = {
-        "batch_id": batch.id,
-        "destination": batch.destination,
-        "vehicle": batch.vehicle,
-        "package_id": package.id
-    }
     session.close()
-    return result
+    return {"message": "Dispatched successfully"}
+
 
 #user
-def register_user(user_name:str, password:str):
+def register_user(user_name:str, password:str, user_type:str):
     session = Session(engine)
     user_exists = session.query(User).filter_by(user_name=user_name).first()
     if user_exists is  not None :
         session.close()
         return False
-    session.add(User(user_name=user_name,password=ph.hash(password)))
+    session.add(User(user_name=user_name,password=ph.hash(password),user_type=user_type))
     session.commit()
     session.close()
     return True
